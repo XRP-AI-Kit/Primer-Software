@@ -3,133 +3,229 @@
 # Tested on Ubuntu 22.04+ (Rubik Pi 3)
 # Run with: bash install.sh
 
-# FIXED: Added command-line screen blanking adjustment, auto-login configuration, model download, and ensured LF line endings.
-set -e # Exit on error
-set -u # Treat unset vars as errors
+# This script sets up the XRP Primer AI Kit Demo, including system dependencies,
+# auto-login configuration, Python environment setup, and model downloads.
+
+set -e         # Exit immediately if a command exits with a non-zero status.
+set -u         # Treat unset variables and parameters as an error.
+set -o pipefail # The return value of a pipeline is the status of the last command to exit with a non-zero status.
+
+# --- GLOBAL VARIABLES ---
+USER_TO_AUTOLOGIN=$(whoami)
+PROJECTS_DIR="$HOME/projects"
+REPO_NAME="Primer-Software"
+REPO_URL="https://github.com/SaintSampo/Primer-Software"
+REPO_PATH="$PROJECTS_DIR/$REPO_NAME"
+VENV_PATH="$REPO_PATH/venv"
+PYTHON_BIN="$VENV_PATH/bin/python"
+PYTHON_SCRIPT_PATH="$REPO_PATH/src/primer.py"
 
 # --- COLOR OUTPUT HELPERS ---
 info()    { echo -e "\033[1;34m[INFO]\033[0m $*"; }
 success() { echo -e "\033[1;32m[SUCCESS]\033[0m $*"; }
 warn()    { echo -e "\033[1;33m[WARN]\033[0m $*"; }
-error()   { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; }
+error()   { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; exit 1; }
 
-# --- STEP 1: Disable Screen Blanking via CLI ---
-info "Disabling screen blanking and auto-suspend for installation longevity (set to 'Never')..."
-# Set idle-delay to 0 (Never) for the current GNOME session.
+# Helper function to check the status of the last command
+check_status() {
+    local exit_code=$?
+    local step_name="$1"
+    if [ $exit_code -ne 0 ]; then
+        error "$step_name failed with exit code $exit_code."
+    fi
+}
+
+# --- FUNCTIONS ---
+
+# Downloads a file if it doesn't already exist.
+download_model() {
+    local url="$1"
+    local output_path="$2"
+    local filename=$(basename "$output_path")
+
+    # Check if file exists and is not zero size (-s)
+    if [ -f "$output_path" ] && [ -s "$output_path" ]; then
+        warn "$filename already exists and is non-empty, skipping download."
+        return 0
+    fi
+
+    info "Downloading $filename from $url..."
+    # Use -q (quiet) and --show-progress for a cleaner progress bar
+    wget -q --show-progress -O "$output_path" "$url"
+    check_status "Download of $filename"
+
+    if [ -s "$output_path" ]; then
+        success "$filename downloaded successfully."
+    else
+        error "Failed to download $filename: File is empty or download failed."
+    fi
+}
+
+# Configures the autostart .desktop file to run the main script on login.
+setup_autostart() {
+    info "Setting up autostart entry for '$PYTHON_SCRIPT_PATH'..."
+
+    local AUTOSTART_DIR="$HOME/.config/autostart"
+    local SCRIPT_FILENAME=$(basename "$PYTHON_SCRIPT_PATH")
+    local DESKTOP_FILENAME="${SCRIPT_FILENAME%.*}.desktop"
+    local DESKTOP_PATH="${AUTOSTART_DIR}/${DESKTOP_FILENAME}"
+
+    # 1. Validate the script path
+    if [ ! -f "$PYTHON_SCRIPT_PATH" ]; then
+        error "Autostart failed: Python script not found at '$PYTHON_SCRIPT_PATH'. (Ensure clone step succeeded)"
+    fi
+
+    # 2. Create the autostart directory
+    mkdir -p "$AUTOSTART_DIR"
+    check_status "Creating autostart directory"
+
+    # 3. Define the execution command: Use the virtual environment's python.
+    # The command uses 'bash -c' to ensure we change directory, activate the venv,
+    # and then execute the script, all in one line for the .desktop file.
+    local EXEC_COMMAND="bash -c 'cd \"$REPO_PATH\" && source venv/bin/activate && sudo \"$PYTHON_BIN\" \"$PYTHON_SCRIPT_PATH\"'"
+
+    # 4. Write the .desktop file content
+    cat << EOF > "$DESKTOP_PATH"
+[Desktop Entry]
+Type=Application
+Exec=$EXEC_COMMAND
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=$SCRIPT_FILENAME Startup
+Comment=Automatically executes the Primer AI script on user login from its virtual environment.
+Keywords=AI;Primer;
+EOF
+    check_status "Creating .desktop file"
+
+    # 5. Set permissions
+    chmod +x "$DESKTOP_PATH"
+    success "Autostart desktop entry created: $DESKTOP_PATH"
+
+    echo "--- Autostart Command ---"
+    echo "This command will run: $EXEC_COMMAND"
+    echo "-------------------------"
+}
+
+# -----------------------------------------------------------------------------
+## 1. Configure System Session Settings (Screen Blanking & Auto-Login)
+# -----------------------------------------------------------------------------
+info "Disabling screen blanking and locking for current GNOME session..."
 gsettings set org.gnome.desktop.session idle-delay 0
-# Also disable screen locking to prevent interruptions
 gsettings set org.gnome.desktop.screensaver lock-enabled false
-success "Screen blanking disabled."
+success "Screen blanking and locking disabled."
 
+info "Configuring GDM3 for automatic login for user '$USER_TO_AUTOLOGIN'..."
+if [ -f /etc/gdm3/custom.conf ]; then
+    # Use sed -E for extended regex to handle commented or existing lines robustly
+    sudo sed -i.bak -E \
+        -e 's/^#?(AutomaticLoginEnable=).*$/AutomaticLoginEnable=true/' \
+        -e "s/^#?(AutomaticLogin=).*$/AutomaticLogin=$USER_TO_AUTOLOGIN/" \
+        /etc/gdm3/custom.conf
+    check_status "Setting GDM auto-login"
+    success "Auto-login set for next reboot. (User: $USER_TO_AUTOLOGIN)"
+else
+    warn "/etc/gdm3/custom.conf not found. Skipping auto-login configuration."
+fi
 
-# --- STEP 2: Configure Auto-Login on Boot ---
-info "Configuring GDM3 for automatic login for user '$(whoami)'..."
-USER_TO_AUTOLOGIN=$(whoami)
-# Use sed to enable AutomaticLoginEnable and set the target user in the GDM custom.conf
-sudo sed -i '/^#AutomaticLoginEnable=/c\AutomaticLoginEnable=true' /etc/gdm3/custom.conf
-sudo sed -i "/^#AutomaticLogin=/c\AutomaticLogin=$USER_TO_AUTOLOGIN" /etc/gdm3/custom.conf
-success "Auto-login set for next reboot. (User: $USER_TO_AUTOLOGIN)"
-
-
-# --- STEP 3: System Update (COMMENTED OUT AS REQUESTED) ---
+# -----------------------------------------------------------------------------
+## 2. System Update and Dependencies
+# -----------------------------------------------------------------------------
+# System Update is commented out as in the original script.
 # info "Updating system packages..."
 # sudo apt update && sudo apt upgrade -y
 
-# --- STEP 4: Install dependencies ---
-info "Installing required packages (git, curl, build tools, python3.12, audio dev libs, venv)..."
+info "Installing required packages (git, curl, wget, build tools, python3.12, audio dev libs, venv)..."
 sudo apt install -y git curl wget python3.12 python3.12-venv build-essential python3-dev libportaudio2 portaudio19-dev
+check_status "Installing required packages"
+success "System dependencies installed."
 
-# --- STEP 5: Create projects folder (if missing) ---
-PROJECTS_DIR="$HOME/projects"
-if [ ! -d "$PROJECTS_DIR" ]; then
-    info "Creating projects directory at $PROJECTS_DIR"
-    mkdir -p "$PROJECTS_DIR"
-fi
-cd "$PROJECTS_DIR"
+# -----------------------------------------------------------------------------
+## 3. Clone Repository and Setup Python Virtual Environment
+# -----------------------------------------------------------------------------
+info "Ensuring projects directory structure exists..."
+mkdir -p "$PROJECTS_DIR"
+check_status "Creating projects directory"
 
-# --- STEP 6: Clone repo if missing ---
-REPO_URL="https://github.com/SaintSampo/Primer-Software"
-REPO_NAME="Primer-Software"
-if [ ! -d "$REPO_NAME" ]; then
-    info "Cloning repository..."
-    git clone "$REPO_URL"
+if [ ! -d "$REPO_PATH" ]; then
+    info "Cloning repository to $REPO_PATH..."
+    # Execute clone in a subshell so 'cd' doesn't affect the main script
+    (
+        cd "$PROJECTS_DIR" && git clone "$REPO_URL"
+    )
+    check_status "Cloning repository"
 else
-    warn "Repository already exists, skipping clone."
+    warn "Repository already exists at $REPO_PATH, skipping clone."
 fi
-cd "$REPO_NAME"
 
-# --- STEP 7: Set up Python venv ---
+# Move into the repository directory for subsequent steps
+cd "$REPO_PATH"
+
 if [ ! -d "venv" ]; then
-    info "Creating Python 3.12 virtual environment..."
+    info "Creating Python 3.12 virtual environment at $VENV_PATH..."
     python3.12 -m venv venv
+    check_status "Creating virtual environment"
 else
     warn "Virtual environment already exists, skipping creation."
 fi
 
-info "Activating virtual environment..."
+info "Activating virtual environment and installing Python dependencies..."
+# This activation is temporary for the rest of the script's execution
 source venv/bin/activate
 
-# --- STEP 8: Install Python dependencies ---
 if [ -f "requirements.txt" ]; then
-    info "Installing Python dependencies..."
     pip install -r requirements.txt
+    check_status "Installing Python dependencies"
+    success "Python dependencies installed."
 else
-    warn "No requirements.txt found — skipping."
+    warn "No requirements.txt found — skipping Python dependency installation."
 fi
 
-# --- STEP 9: Install Ollama if missing ---
+# -----------------------------------------------------------------------------
+## 4. Install Ollama and Download TinyLlama Model
+# -----------------------------------------------------------------------------
 if ! command -v ollama >/dev/null 2>&1; then
     info "Installing Ollama..."
     curl -fsSL https://ollama.com/install.sh | sh
+    check_status "Installing Ollama"
 else
-    warn "Ollama already installed, skipping."
+    warn "Ollama already installed, skipping installation."
 fi
 
-# --- STEP 10: Download TinyLlama Model ---
-info "Downloading TinyLlama model via Ollama..."
-# This command automatically runs in the background thanks to the Ollama install script
-ollama pull tinyllama
-success "TinyLlama model download initiated."
+info "Downloading TinyLlama model via Ollama (initiated in the background)..."
+ollama pull tinyllama &
+OLLAMA_PID=$!
+warn "TinyLlama download started (PID: $OLLAMA_PID). It may take time, but the script will continue."
 
-
-# --- STEP 11: Download Whisper models automatically ---
+# -----------------------------------------------------------------------------
+## 5. Download Whisper Models (ONNX)
+# -----------------------------------------------------------------------------
 info "Setting up Whisper ONNX models..."
 
-WHISPER_DIR="lib/whisper"
-DECODER_URL="https://huggingface.co/onnx-community/whisper-tiny.en/resolve/main/onnx/decoder_model.onnx"
-ENCODER_URL="https://huggingface.co/onnx-community/whisper-tiny.en/resolve/main/onnx/encoder_model.onnx"
-
+WHISPER_DIR="lib/whisper" # Relative to $REPO_PATH
 mkdir -p "$WHISPER_DIR"
 
-download_model() {
-    local url="$1"
-    local output="$2"
-
-    if [ -f "$output" ]; then
-        warn "$(basename "$output") already exists, skipping download."
-    else
-        info "Downloading $(basename "$output")..."
-        wget -q --show-progress -O "$output" "$url"
-    fi
-
-    if [ -s "$output" ]; then
-        success "$(basename "$output") downloaded successfully."
-    else
-        error "Failed to download $(basename "$output"). Please check your connection."
-        exit 1
-    fi
-}
+DECODER_URL="https://huggingface.co/onnx-community/whisper-tiny.en/resolve/main/onnx/decoder_model.onnx"
+ENCODER_URL="https://huggingface.co/onnx-community/whisper-tiny.en/resolve/main/onnx/encoder_model.onnx"
 
 download_model "$DECODER_URL" "$WHISPER_DIR/decoder_model.onnx"
 download_model "$ENCODER_URL" "$WHISPER_DIR/encoder_model.onnx"
 
-# --- STEP 12: Final instructions ---
+# -----------------------------------------------------------------------------
+## 6. Configure Autostart on Login
+# -----------------------------------------------------------------------------
+setup_autostart
+
+# -----------------------------------------------------------------------------
+## 7. Final Instructions
+# -----------------------------------------------------------------------------
 success "Installation complete!"
 echo
-echo "Activate your Python environment with:"
-echo "  source venv/bin/activate"
+echo "To manually run the demo:"
+echo "1. Change directory to: cd $REPO_PATH"
+echo "2. Activate environment: source venv/bin/activate"
+echo "3. Run the script (use sudo if GPIO access is required):"
+echo "   sudo $PYTHON_BIN src/primer.py"
 echo
-echo "Then run the demo with:"
-echo "  sudo ./venv/bin/python src/primer.py"
-echo
-warn "You may need to log out and back in for GPIO group changes to take effect. The system is also configured for automatic login on next boot."
+warn "The system is configured for automatic login and autostart on the next boot."
+warn "You may need to log out and back in, or reboot, for changes to take full effect."
