@@ -1,4 +1,7 @@
 requests
+build-essentials
+python3-dev
+portaudio19-dev
 pyaudio
 numpy
 ollama
@@ -10,3 +13,4 @@ onnxruntime
 transformers
 python-periphery
 Pillow
+webrtcvad
