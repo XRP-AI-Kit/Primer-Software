@@ -6,9 +6,10 @@ This repository provides a guide for setting up a local Large Language Model (LL
 
 ## 1. Initial Hardware Setup: Ubuntu OS on the Rubik Pi 3
 
-The first step is to follow [this guide](https://www.thundercomm.com/rubik-pi-3/en/docs/rubik-pi-3-user-manual/1.0.0-u/Update-Software/3.2.Flash-using-Qualcomm-Launcher) to install Ubuntu Server on the Rubik Pi 3. Ubuntu host is reccomended.
+The first step is to follow [this guide](https://www.thundercomm.com/rubik-pi-3/en/docs/rubik-pi-3-user-manual/1.0.0-u/Update-Software/3.2.Flash-using-Qualcomm-Launcher) to install Ubuntu Server on the Rubik Pi 3. Then follow [these instructions](https://www.thundercomm.com/rubik-pi-3/en/docs/rubik-pi-3-user-manual/1.0.0-u/Troubleshooting/11.3.ubuntu-desktop-vs-server/#switch-from-ubuntu-desktop-version-to-server-version) to switch to ubuntu desktop.
 
 **Abridged OS install instructions**
+
 Please read the official documentation linked above very closely. That said, here is summary of the steps required
 - Put the Rubik Pi in EDL mode
 - Flash Ubuntu with Qualcomm-Launcher
