@@ -154,8 +154,51 @@ setup_spi_permissions() {
 
     # 6. Final Instructions
     success "SPI Permissions setup is complete."
-    warn "⚠️ IMPORTANT: You must **log out and log back in** (or reboot) for your user's new group membership to take effect."
-    echo "Once logged back in, you should be able to run your script without 'sudo' for SPI access."
+}
+
+# Grants the current user persistent read/write access to GPIO devices (like /dev/gpiochipX) via udev rules and group membership.
+setup_gpio_permissions() {
+    info "Starting GPIO device permissions setup for periphery-python..."
+
+    # --- CONFIGURATION ---
+    local GPIO_GROUP="gpio"
+    local UDEV_RULE_FILE="/etc/udev/rules.d/98-gpio-access.rules"
+    local CURRENT_USER=$(whoami)
+    # ---------------------
+
+    echo "--- Granting $CURRENT_USER access to GPIO devices (via /dev/gpiochipX) ---"
+
+    # 1. Create the 'gpio' group if it doesn't exist
+    info "1. Creating group '$GPIO_GROUP' (if it doesn't exist)..."
+    sudo groupadd -f $GPIO_GROUP
+    check_status "Creating group '$GPIO_GROUP'"
+
+    # 2. Add the current user to the 'gpio' group
+    info "2. Adding user '$CURRENT_USER' to group '$GPIO_GROUP'..."
+    sudo usermod -a -G $GPIO_GROUP $CURRENT_USER
+    check_status "Adding user to group '$GPIO_GROUP'"
+
+    # 3. Create a persistent udev rule
+    info "3. Creating udev rule to set permissions on boot..."
+    # The rule sets the ownership group for all gpiochip devices to 'gpio' with read/write access (MODE="0660").
+    echo "SUBSYSTEM==\"gpio\", KERNEL==\"gpiochip*\", MODE=\"0660\", GROUP=\"$GPIO_GROUP\"" | sudo tee $UDEV_RULE_FILE > /dev/null
+    check_status "Creating udev rule file for GPIO"
+
+    # 4. Apply the new udev rules immediately
+    info "4. Reloading and triggering udev rules for immediate effect..."
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+    check_status "Applying udev rules for GPIO"
+
+    # 5. Verify the new device permissions
+    echo "5. Verifying permissions for /dev/gpiochip0 (look for 'rw-rw----' and group 'gpio')..."
+    if [ -e "/dev/gpiochip0" ]; then
+        ls -l /dev/gpiochip0
+    else
+        warn "/dev/gpiochip0 not found. Permissions will apply when the device is created/enabled."
+    fi
+
+    success "GPIO Permissions setup is complete."
 }
 
 # -----------------------------------------------------------------------------
@@ -197,7 +240,12 @@ success "System dependencies installed."
 setup_spi_permissions
 
 # -----------------------------------------------------------------------------
-## 4. Clone Repository and Setup Python Virtual Environment
+## 4. Configure GPIO Device Permissions
+# -----------------------------------------------------------------------------
+setup_gpio_permissions
+
+# -----------------------------------------------------------------------------
+## 5. Clone Repository and Setup Python Virtual Environment
 # -----------------------------------------------------------------------------
 info "Ensuring projects directory structure exists..."
 mkdir -p "$PROJECTS_DIR"
@@ -238,7 +286,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-## 5. Install Ollama and Download TinyLlama Model
+## 6. Install Ollama and Download TinyLlama Model
 # -----------------------------------------------------------------------------
 if ! command -v ollama >/dev/null 2>&1; then
     info "Installing Ollama..."
@@ -254,7 +302,7 @@ OLLAMA_PID=$!
 warn "TinyLlama download started (PID: $OLLAMA_PID). It may take time, but the script will continue."
 
 # -----------------------------------------------------------------------------
-## 6. Download Whisper Models (ONNX)
+## 7. Download Whisper Models (ONNX)
 # -----------------------------------------------------------------------------
 info "Setting up Whisper ONNX models..."
 
@@ -268,12 +316,12 @@ download_model "$DECODER_URL" "$WHISPER_DIR/decoder_model.onnx"
 download_model "$ENCODER_URL" "$WHISPER_DIR/encoder_model.onnx"
 
 # -----------------------------------------------------------------------------
-## 7. Configure Autostart on Login
+## 8. Configure Autostart on Login
 # -----------------------------------------------------------------------------
 setup_autostart
 
 # -----------------------------------------------------------------------------
-## 8. Final Instructions
+## 9. Final Instructions
 # -----------------------------------------------------------------------------
 success "Installation complete!"
 echo
@@ -284,4 +332,4 @@ echo "3. Run the script (use sudo if GPIO access is required):"
 echo "   sudo $PYTHON_BIN src/primer.py"
 echo
 warn "The system is configured for automatic login and autostart on the next boot."
-warn "You may need to log out and back in, or reboot, for changes to take full effect (especially for the new SPI permissions)."
+warn "You may need to log out and back in, or reboot, for changes to take full effect (especially for the new SPI and GPIO permissions)."
