@@ -140,7 +140,15 @@ The Rubik Pi 3 is now fully configured.
 
 ### 3.3. Run the Demo
 
-Now that the virtual enviornment is active with all the needed dependancies, you can run the example file
+Now that the virtual enviornment is active with all the needed dependancies, you can test speech to text by running:
 ```bash
-sudo ./venv/bin/python src/primer.py
+./venv/bin/python src/whisper_prompt.py
+```
+or the language model with:
+```bash
+./venv/bin/python src/ollama_chat.py
+```
+if you want to test the display, you can with:
+```bash
+sudo ./venv/bin/python src/render_avatar.py
 ```
