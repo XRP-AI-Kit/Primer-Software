@@ -65,7 +65,7 @@ cd projects
 
 **Clone the Project:**
 ```bash
-git clone https://github.com/SaintSampo/Primer-Software
+git clone https://github.com/XRP-AI-Kit/Primer-Software
 cd Primer-Software
 ```
 
